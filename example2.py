@@ -37,7 +37,14 @@ local_minim = [0]
 line_max = []
 line_min = []
 
+#global variables
+high = []
+low = []
+times = []
+volume = []
+
 smma = [0]
+sb = []
 
 # MACD Section
 lengthMA = 34
@@ -92,6 +99,20 @@ async def calc_zlema2(src: np.ndarray, length: int) -> np.ndarray:
     d = ema1 - ema2
     return ema1 + d
 
+def find_last(list: list,counter: int):
+    #find the last element from the current position: counter to 0.
+    if counter < 2:
+        return 0
+    else:
+        for i in range(1,counter):
+            if list[counter-i] > 0:
+                return list[counter-i]
+            else:
+                continue
+            
+    
+
+
 async def stability_interval():
     async def strategy(ctx):
          # Will be called at each candle.
@@ -142,7 +163,7 @@ async def stability_interval():
             for count_a in range(medie_close_period,len(closes)-1):
                 if closes[count_a-1] > closes[count_a] and closes[count_a] < closes[count_a+1]:
                     if closes[count_a] / medie_close[count_a-medie_close_period] <= 1 - pr_vrf_dif_medie:
-                        local_minim.append(-closes[count_a])
+                        local_minim.append(closes[count_a])
                     else:
                         local_minim.append(0)
                 else:
@@ -175,38 +196,38 @@ async def stability_interval():
             await obs.plot(ctx, "ImpulseHisto", times[:], sh, mode="scatter",color="white", chart="main-chart")
             await obs.plot(ctx, "ImpulseMACDCDSignal", times[:], sb, mode="lines",color="green", chart="main-chart")
 
-        last_pos_max = 0
-        last_pos_min = 0
-        ultimul_x = 0
-        suma_varfuri_high = 0
-        inc = 0
-        line_max_exists = False
-        line_max_exists = False
-        procent_max = 0
-        procent_min = 0
+        for i in range(0, len(local_maxim)-interval_stabil,interval_stabil-1):
+            
+            last_pos_max = 0
+            last_pos_min = 0
+            ultimul_x = 0
+            suma_varfuri_high = 0
+            inc = 0
+            line_max_exists = False
+            line_min_exists = False
+            procent_max = 0
+            procent_min = 0
 
-        for i in range(0, len(local_maxim)-interval_stabil):
-            for j in range(0, interval_stabil):
+            for j in range(0, interval_stabil,1):
                 
+                procent_max = 0
+                procent_min = 0
                 # Cu cat % este diferenta intre maxime ?
-                if ( local_maxim[i+j+1] != 0 ):
-                    procent_max = local_maxim[i+j] / local_maxim[i+j+1]
-                if ( local_minim[i+j+1] != 0 ):
-                    procent_min = local_minim[i+j] / local_minim[i+j+1]
+                if ( local_maxim[i+j] != 0 ):
+                    procent_max = find_last(local_maxim,j) / local_maxim[i+j]
+                if ( local_minim[i+j] != 0 ):
+                    procent_min = find_last(local_maxim,j) / local_minim[i+j]
                 
-                if i>100:
-                    print("i>100")
-
                 #if there is a much higher peak than the maximum peaks - no stability interval
-                if procent_max > 1 + proc_intre_vrf_line_IS: 
-                    break
+                #if procent_max > 1 + proc_intre_vrf_line_IS and procent_max !=0:
+                #    break
 
                 #if there is a much lower peak than the minimum peaks - no stability interval
-                if procent_min < 1-proc_intre_vrf_line_IS:
-                    break
+                #if procent_min < 1-proc_intre_vrf_line_IS and procent_min !=0:
+                #    break
                 
-                if abs(sb[i+j]) >= macd_max_delta:
-                    break
+                #if abs(sb[i+j]) >= macd_max_delta:
+                #    break
                 
                 if procent_max <= 1+proc_intre_vrf_line_IS and procent_max >= 1-proc_intre_vrf_line_IS:
                     last_pos_max=i+j
@@ -226,14 +247,14 @@ async def stability_interval():
                         line_min_exists = True
                 
             ## ______ Definire interval stabilitate ______
-            if last_pos_max !=0 and last_pos_max >=IS_length_min and line_max_exists == false:
-                line_max.append(high[i+j+1]-last_pos_max-1)
+            if last_pos_max !=0 and last_pos_max >=IS_length_min and line_max_exists == False:
+                line_max.append(high[last_pos_max])
                 #array.push(line_max,line.new(bar_index - last_pos_max-1, (high[last_pos_max] + high[1])/2, bar_index-1, (high[last_pos_max] + high[1])/2,color=color.green,width = 4))
                 #log.info("Found max line with high[{1}] = {0}", high[last_pos_max], last_pos_max)
             else:
                 #____ Verific daca am un interval mai mare de stabilitate ____
-                if last_pos_max !=0 and last_pos_max >=IS_length_min and line_max_exists == true and math.abs(sb)-macd_max_delta <=0 and math.abs(sb[last_pos_max])<= macd_max_delta:
-                    #log.info("sb = {0}, abs(sb)={1}", sb, math.abs(sb)-macd_max_delta)
+                if last_pos_max !=0 and last_pos_max >=IS_length_min and line_max_exists == True and abs(sb)-macd_max_delta <=0 and abs(sb[last_pos_max])<= macd_max_delta:
+                    #log.info("sb = {0}, abs(sb)={1}", sb, abs(sb)-macd_max_delta)
                     #log.info("Found wider max line with high[{1}] = {0}", high[last_pos_max], last_pos_max)
                     wider_line_max = True
                     line_max.append(0)
@@ -242,13 +263,13 @@ async def stability_interval():
                     #array.push(line_max,na)
                     #log.info("pushed max_na")
             
-            if last_pos_min !=0 and last_pos_min >=IS_length_min and line_min_exists == false:
-                line_min.append(low[i+j+1]-last_pos_min-1)
+            if last_pos_min !=0 and last_pos_min >=IS_length_min and line_min_exists == False:
+                line_min.append(low[last_pos_min])
                 #array.push(line_min,line.new(bar_index - last_pos_min-1, (low[last_pos_min] + low[1])/2, bar_index-1, (low[last_pos_min] + low[1])/2,color=color.red,width = 4))
                 #log.info("Found min line with low[{1}] = {0}", low[last_pos_min], last_pos_min)
             else:
-                if last_pos_min !=0 and last_pos_min >=IS_length_min and line_min_exists == true and math.abs(sb)-macd_max_delta <=0 and math.abs(sb[last_pos_min])<= macd_max_delta:
-                    #log.info("sb = {0}, abs(sb)={1}", sb, math.abs(sb)-macd_max_delta)
+                if last_pos_min !=0 and last_pos_min >=IS_length_min and line_min_exists == True and abs(sb)-macd_max_delta <=0 and abs(sb[last_pos_min])<= macd_max_delta:
+                    #log.info("sb = {0}, abs(sb)={1}", sb, abs(sb)-macd_max_delta)
                     #log.info("Found wider min line with low[{1}] = {0}", low[last_pos_min], last_pos_min)
                     wider_line_min = True
                     line_min.append(0)
@@ -281,7 +302,6 @@ async def stability_interval():
         "var_nr_volume": 3,  #cate volume mari sa fie in IS
         "max_val": 2500,
     }
-
 
      # Read and cache candle data to make subsequent backtesting runs faster.
     datafile = "ExchangeHistoryDataCollector_1725784408.359507.data"
