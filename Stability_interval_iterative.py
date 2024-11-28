@@ -119,20 +119,10 @@ async def macd_improved(high, low, hlc3):
     #end of MACD
     return [sb,md,sh]
 
-async def define_stability_interval(ctx):
+async def define_stability_interval(closes, high, low, times, volume):
         # Will be called at each candle.
     interval_stabilitate = False
-    global high
-    global low
-    global times
-    global volume
-    global sb
 
-    closes = await obs.Close(ctx, max_history=True)
-    high = await obs.High(ctx, max_history=True)
-    low = await obs.Low(ctx, max_history=True)
-    times = await obs.Time(ctx, max_history=True, use_close_time=True)
-    volume = await obs.Volume(ctx, max_history=True)
     hlc3 = (high + low + closes)/3
 
     medie_close = tulipy.sma(closes, medie_close_period)
@@ -271,7 +261,13 @@ async def define_stability_interval(ctx):
 
 async def stability_interval():
 
-    interval_stabil1 = await define_stability_interval(ctx)
+    closes = await obs.Close(ctx, max_history=True)
+    high = await obs.High(ctx, max_history=True)
+    low = await obs.Low(ctx, max_history=True)
+    times = await obs.Time(ctx, max_history=True, use_close_time=True)
+    volume = await obs.Volume(ctx, max_history=True)
+
+    interval_stabil1 = await define_stability_interval(closes, high, low, times, volume)
 
     async def strategy(ctx):
         #rsi_v = tulipy.rsi(closes, period=ctx.tentacle.trading_config["period"])
@@ -313,7 +309,7 @@ async def stability_interval():
      # Read and cache candle data to make subsequent backtesting runs faster.
     datafile = "ExchangeHistoryDataCollector_1725784408.359507.data"
      #data = await obs.get_data("ETH/USDT", "1d") #, start_timestamp=1720410417)
-    data = await obs.get_data("ETH/USDT", "1d", data_file=datafile,)
+    data = await obs.get_data("ETH/USDT", "1d", data_file=datafile)
     run_data = {
         "entries": None,
     }
