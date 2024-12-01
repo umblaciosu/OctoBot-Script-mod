@@ -4,6 +4,7 @@ import octobot_script as obs
 import numpy as np
 import pandas as pd
 import talib as tl
+import matplotlib.pyplot as plt
 
 #--------------------------INPUTS--------------------------------
 global closes
@@ -37,6 +38,8 @@ wider_line_min = False
 # Array to store local maxima
 local_maxim = [0]
 local_minim = [0]
+global max_pairs
+global min_pairs
 line_max = []
 line_min = []
 
@@ -119,6 +122,41 @@ async def macd_improved(high, low, hlc3):
     #end of MACD
     return [sb,md,sh]
 
+async def find_valid_pairs(data, time_series, max_diff_fraction):
+    #AI generated
+    """
+    Find all pairs (i, j) in the list `data` such that:
+    1. Both elements are non-zero.
+    2. The difference between the values is no more than max_diff_fraction% [ 0.1 for 10% ] of the smaller value.
+    3. All values between the indices of the pair are less than or equal to the larger value of the pair.
+    
+    Parameters:
+        data (list): List of integers.
+    
+    Returns:
+        list: A list of tuples, where each tuple contains the indices and values of the valid pairs.
+    """
+    pairs = []
+    n = len(data)
+    
+    for i in range(n):
+        for j in range(i + 1, n):
+            a, b = data[i], data[j]
+            
+            # Both values must be non-zero
+            if a == 0 or b == 0:
+                continue
+            
+            # Check the 10% difference condition
+            if abs(a - b) > max_diff_fraction * min(a, b):
+                continue
+            
+            # Check if there is a greater value between the pairs
+            if all(data[k] <= max(a, b) for k in range(i + 1, j)):
+                pairs.append(((time_series[i], time_series[j]), (a, b)))
+    
+    return pairs
+
 async def define_stability_interval(ctx):
         # Will be called at each candle.
     interval_stabilitate = False
@@ -127,6 +165,8 @@ async def define_stability_interval(ctx):
     global times
     global volume
     global sb
+    global max_pairs
+    global min_pairs
 
     closes = await obs.Close(ctx, max_history=True)
     high = await obs.High(ctx, max_history=True)
@@ -153,10 +193,10 @@ async def define_stability_interval(ctx):
 
     sb,md,sh = macd_improved(high,low,hlc3)
 
-    for count_a in range(medie_close_period,len(closes)-1):
-        if closes[count_a-1] < closes[count_a] and closes[count_a] > closes[count_a+1]:
-            if closes[count_a] / medie_close[count_a-medie_close_period] >= 1 + pr_vrf_dif_medie:
-                local_maxim.append(closes[count_a])
+    for i in range(medie_close_period,len(closes)-1):
+        if closes[i-1] < closes[i] and closes[i] > closes[i+1]:
+            if closes[i] / medie_close[i-medie_close_period] >= 1 + pr_vrf_dif_medie:
+                local_maxim.append(closes[i])
             else:
                 local_maxim.append(0)
         else:
@@ -164,10 +204,10 @@ async def define_stability_interval(ctx):
     local_maxim.append(0) # to be removed !!! -------
 
     #Build the local_minim list
-    for count_a in range(medie_close_period,len(closes)-1):
-        if closes[count_a-1] > closes[count_a] and closes[count_a] < closes[count_a+1]:
-            if closes[count_a] / medie_close[count_a-medie_close_period] <= 1 - pr_vrf_dif_medie:
-                local_minim.append(closes[count_a])
+    for i in range(medie_close_period,len(closes)-1):
+        if closes[i-1] > closes[i] and closes[i] < closes[i+1]:
+            if closes[i] / medie_close[i-medie_close_period] <= 1 - pr_vrf_dif_medie:
+                local_minim.append(closes[i])
             else:
                 local_minim.append(0)
         else:
@@ -184,6 +224,9 @@ async def define_stability_interval(ctx):
     await obs.plot(ctx, "ImpulseMACD", times[:], md, mode="scatter",color="blue", chart="main-chart")
     await obs.plot(ctx, "ImpulseHisto", times[:], sh, mode="scatter",color="white", chart="main-chart")
     await obs.plot(ctx, "ImpulseMACDCDSignal", times[:], sb, mode="lines",color="green", chart="main-chart")
+
+    max_pairs = await find_valid_pairs(local_maxim, times, proc_intre_vrf_line_IS)
+    min_pairs = await find_valid_pairs(local_minim, times, proc_intre_vrf_line_IS)
 
     for i in range(0, len(local_maxim)-interval_stabil,interval_stabil-1):
         
