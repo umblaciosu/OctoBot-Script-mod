@@ -13,12 +13,14 @@ global volume
 
 global medie_close
 global medie_volum
+global interval_stabil_flag
+interval_stabil_flag = False
 interval_stabil_final=[]
 global counter_strategy_run
 counter_strategy_run = 0
 
 IS_length_min = 20  # nr pozitii minime intre varfuri
-interval_stabil = 150
+interval_stabil = 100
 
 proc_intre_vrf_line_IS = 0.1  #(2%)
 pr_vrf_dif_medie = 0.025  #(2.5%)
@@ -118,8 +120,7 @@ async def macd_improved(high, low, hlc3):
     #end of MACD
     return [sb,md,sh]
 
-async def find_valid_pairs(data, time_series, max_diff_fraction, isMax):
-    #AI generated
+async def find_valid_pairs(closes, high, low, data, time_series, max_diff_fraction, isMax):
     """
     Find all pairs (i, j) in the list `data` such that:
     1. Both elements are non-zero.
@@ -149,30 +150,34 @@ async def find_valid_pairs(data, time_series, max_diff_fraction, isMax):
                 continue
             
             # Case max_value interval - check if there is a greater value between the pairs
+            # Check if 
             flag = False
             if isMax == True:
                 for k in range(i + 1, j):
-                    if data[k] > max(a, b):
+                    c = closes[k]
+                    if c == 1729.42:
+                        print("this!")
+                    if c > a or c > b:
                         flag = True
                         break
             else:
             # Case min_value interval - check if there is a lower value between the pairs
                 for k in range(i + 1, j):
-                    if data[k] < min(a, b) and data[k]!=0:
+                    if closes[k] < a or closes[k] < b:
                         flag = True
                         break
                     
-            if flag == False:
+            if flag == False and abs(i-j) >= IS_length_min:
                 pairs.append(((time_series[i], time_series[j]), (a, b)))
     return pairs
 
 # Function to find the maximum overlapping interval with the smallest price difference
-def find_max_overlap_with_price(maximum_list, minimum_list):
+def find_max_overlap_with_price(maximum_list, minimum_list, closes, times):
     # Function to find the overlap between two intervals
     def overlap(interval1, interval2):
         start = max(interval1[0][0], interval2[0][0])
         end = min(interval1[0][1], interval2[0][1])
-        if start < end and end-start > 86400*IS_length_min:  # Valid overlap
+        if start < end and end - start > 86400*IS_length_min/3: #a  minimum overlap
             return start, end
         return None  # No overlap
 
@@ -184,33 +189,28 @@ def find_max_overlap_with_price(maximum_list, minimum_list):
     for max_interval in maximum_list:
         for min_interval in minimum_list:
             overlapping_interval = overlap(max_interval, min_interval)
+
             if overlapping_interval:
+                #### find if between start interval and end interval if closes > max or closes < min
+                time_start = overlapping_interval[0]
+                index_start = times.index(time_start)
+                time_end = max(min_interval[0][1], min_interval[0][1])
+                index_end = times.index(time_end)
+                for i in range(index_start,index_end):
+                    value1 = closes[i]
+                    if value1 > ( max_interval[1][0] + max_interval[1][1] ) / 2:
+                        return None
+                    else:
+                        if value1 < ( min_interval[1][0] + min_interval[1][1] ) / 2:
+                            return None
                 overlap_start, overlap_end = overlapping_interval
                 overlap_duration = overlap_end - overlap_start
 
-                # Interpolate prices for the overlapping start and end times
-                def interpolate_price(interval, time):
-                    price_start, price_end = interval[1][0], interval[1][1]
-                    return price_start + (price_end - price_start) * ((time - interval[0][0]) / (interval[0][1] - interval[0][0]))
-
-                max_price_start = interpolate_price(max_interval, overlap_start)
-                max_price_end = interpolate_price(max_interval, overlap_end)
-                min_price_start = interpolate_price(min_interval, overlap_start)
-                min_price_end = interpolate_price(min_interval, overlap_end)
-
-                # Calculate average price difference over the overlap
-                price_difference = abs((max_price_start + max_price_end) / 2 - (min_price_start + min_price_end) / 2)
-
                 # Update best interval if the overlap duration is larger or price difference is smaller
                 if (overlap_duration > max_overlap) or (
-                    overlap_duration == max_overlap and price_difference < min_price_difference):
+                    overlap_duration == max_overlap ):
                     max_overlap = overlap_duration
-                    min_price_difference = price_difference
                     best_result = {
-                        #"overlap_start": overlap_start,
-                        #"overlap_end": overlap_end,
-                        #"max_prices": (max_price_start, max_price_end),
-                        #"min_prices": (min_price_start, min_price_end),
                         "max_int_start_time": max_interval[0][0],
                         "max_int_start_price": max_interval[1][0],
                         "max_int_end_time": max_interval[0][1],
@@ -228,8 +228,8 @@ async def define_stability_interval(closes, high, low, times, volume,ctx):
     global sb
     global max_pairs
     global min_pairs
-    local_maxim = [0]
-    local_minim = [0]
+    local_maxim = []
+    local_minim = []
 
     hlc3 = (high + low + closes)/3
 
@@ -255,6 +255,11 @@ async def define_stability_interval(closes, high, low, times, volume,ctx):
     #local_maxim.clear()
     #local_minim.clear()
 
+    #prepare length for local_maxim and local_minim
+    for i in range(medie_close_period):
+        local_maxim.append(0)
+        local_minim.append(0)
+    
     for i in range(medie_close_period,len(closes)-1):
         if closes[i-1] < closes[i] and closes[i] > closes[i+1]:
             if closes[i] / medie_close[i-medie_close_period] >= 1 + pr_vrf_dif_medie:
@@ -263,7 +268,7 @@ async def define_stability_interval(closes, high, low, times, volume,ctx):
                 local_maxim.append(0)
         else:
             local_maxim.append(0)
-    local_maxim.append(0) # to be removed !!! -------
+    local_maxim.append(0) ### To be optimized
 
     #Build the local_minim list
     for i in range(medie_close_period,len(closes)-1):
@@ -274,7 +279,7 @@ async def define_stability_interval(closes, high, low, times, volume,ctx):
                 local_minim.append(0)
         else:
             local_minim.append(0)
-    local_minim.append(0) # to be removed !!! -------
+    local_minim.append(0) ### To be optimized
 
     #await obs.plot_indicator(ctx, "Local_Maxim", times[delta:], local_maxim, run_data["entries"])
     #await obs.plot_indicator(ctx, "Local_Maxim2", times[delta:], local_maxim, run_data["entries2"])
@@ -290,18 +295,32 @@ async def define_stability_interval(closes, high, low, times, volume,ctx):
     await obs.plot(ctx, "ImpulseHisto", times[:], sh, mode="scatter",color="white", chart="main-chart")
     await obs.plot(ctx, "ImpulseMACDCDSignal", times[:], sb, mode="lines",color="green", chart="main-chart")
 
-    max_pairs = await find_valid_pairs(local_maxim, times[:len(local_maxim)], proc_intre_vrf_line_IS, True)
-    min_pairs = await find_valid_pairs(local_minim, times[:len(local_minim)], proc_intre_vrf_line_IS, False)
+    max_pairs = await find_valid_pairs(closes, high, low, local_maxim, times[:len(local_maxim)], proc_intre_vrf_line_IS, True)
+    min_pairs = await find_valid_pairs(closes, high, low, local_minim, times[:len(local_minim)], proc_intre_vrf_line_IS, False)
 
-    best_result = find_max_overlap_with_price(max_pairs, min_pairs)
+    best_result = find_max_overlap_with_price(max_pairs, min_pairs, closes, times)
 
     return best_result
 
-
+def analyze_the_break(last_closes, last_high, last_low, last_times, interval_stabil_local):
+    # Check if closes breaks the stability interval
+    if last_closes > (interval_stabil_local["max_int_start_price"]+interval_stabil_local["max_int_end_price"]) / 2:
+        # check if the high/close ratio is good ( no more than procent_high_close_cross % )
+        if ( last_closes - last_low ) / ( last_high - last_low ) > 1 - procent_high_close_cross:
+            return True
+    else:
+        # check if it breaks the lower interval
+        if last_closes < (interval_stabil_local["min_int_start_price"]+interval_stabil_local["min_int_end_price"]) / 2:
+            return False
+        else:
+            return None
+    
 async def stability_interval():   
     global interval_stabil_final
 
     async def strategy(ctx):
+        global interval_stabil_final
+        global interval_stabil_flag
         if run_data["entries"] is None:
             # Compute entries only once per backtest.
             times_global = await obs.Time(ctx, max_history=True, use_close_time=True)
@@ -315,11 +334,27 @@ async def stability_interval():
         if len(closes) < interval_stabil:
             return
         else:
-            result = await define_stability_interval(closes[-interval_stabil:], high[-interval_stabil:], low[-interval_stabil:], times[-interval_stabil:], volume[-interval_stabil:],ctx)
-            if result not in interval_stabil_final and result != None:
-                interval_stabil_final.append(result)
+            if interval_stabil_flag == False:
+                result1 = await define_stability_interval(closes[-interval_stabil:], high[-interval_stabil:], low[-interval_stabil:], times[-interval_stabil:], volume[-interval_stabil:],ctx)
+                if result1 not in interval_stabil_final and result1 != None:
+                    interval_stabil_flag=True
+                    interval_stabil_final.append(result1)
+            else:
+                mod = analyze_the_break(closes[-1], high[-1], low[-1], times[-1], interval_stabil_final[-1])
+                if mod == False:
+                    interval_stabil_flag=False
+                    print("spargere in jos!")
+                else:
+                    if mod == True:
+                        await obs.market(ctx, "buy", amount="10%", stop_loss_offset="-15%", take_profit_offset="25%")
+                        print("spargere buna!")
+                        interval_stabil_flag=False
+
         
         if times[-1] == times_global[-1] and len(interval_stabil_final)!=0:
+            #After all intervals were found - find overlapping intervals and choose the longest
+            # with the lowest price diff
+            
             #preparing stability intervals found for plotting
             for counter,interval in enumerate(interval_stabil_final):
                 """
@@ -376,8 +411,8 @@ async def stability_interval():
     }
 
      # Read and cache candle data to make subsequent backtesting runs faster.
-    datafile = "ExchangeHistoryDataCollector_1725784408.359507.data"
-     #data = await obs.get_data("ETH/USDT", "1d") #, start_timestamp=1720410417)
+    datafile = "ExchangeHistoryDataCollector_1733862750.5739202.data"
+    #data = await obs.get_data("ETH/USDT", "1d", start_timestamp=1546300800, end_timestamp=1703980800)
     data = await obs.get_data("ETH/USDT", "1d", data_file=datafile)
 
     run_data = {
