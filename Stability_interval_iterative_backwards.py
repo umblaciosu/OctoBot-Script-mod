@@ -9,16 +9,18 @@ import time
 from datetime import datetime
 
 #--------------------------INPUTS--------------------------------
-global closes
-global times
-global volume
+# closes = []
+# times = []
+# volume = []
+# high = []
+# low = []
 
-global medie_close
-global medie_volum
-global interval_stabil_flag
+medie_close = []
+medie_volum = []
 interval_stabil_flag = False
+initial = True
 interval_stabil_final=[]
-global counter_strategy_run
+counter_strategy_run=0
 counter_strategy_run = 0
 
 IS_length_min = 19  # nr pozitii minime intre varfuri
@@ -40,14 +42,10 @@ wider_line_max = False
 wider_line_min = False
 
 # Array to store local maxima
-line_max = []
-line_min = []
+local_maxim = []
+local_minim = []
 
 #global variables
-global high
-global low
-global times
-global volume
 
 smma = [0]
 sb = []
@@ -183,6 +181,70 @@ async def find_valid_pairs(closes, high, low, data, time_series, max_diff_fracti
                 pairs.append(best_result)
     return pairs
 
+async def find_valid_pairs_backwards(closes, high, low, data, time_series, max_diff_fraction, isMax):
+    """
+    Find all pairs (i, j) in the list `data` such that:
+    1. Both elements are non-zero.
+    2. The difference between the values is no more than max_diff_fraction% [ 0.1 for 10% ] of the smaller value.
+    3a. If isMax is True All values between the indices of the pair are less than or equal to the larger value of the pair.
+    3b. If isMax is False All values between the indices of the pair are higher than or equal to the lower value of the pair.
+    
+    Parameters:
+        data (list): List of integers.
+    
+    Returns:
+        list: A list of tuples, where each tuple contains the indices and values of the valid pairs.
+    """
+
+    if data[-1] == 0:
+        return
+
+    pairs = []
+    n = len(data)
+    
+    for i in range(n-1,0,-1):
+        a, b = data[i], data[-1]
+        
+        # Both values must be non-zero
+        if a == 0 or b == 0:
+            continue
+            
+        # Check the max_diff_fraction(%) difference condition
+        if abs(a - b) > max_diff_fraction * min(a, b):
+            continue
+        
+        # Case max_value interval - check if there is a greater value between the pairs
+        # Check if 
+        flag = False
+        if isMax == True:
+            for k in range(j, i-1 ,-1):
+                c = closes[k]
+                # if c == 1729.42:
+                #     print("this!")
+                # if b == 163.31:
+                #     print("that!")
+                if c > a or c > b:
+                    flag = True
+                    break
+        else:
+        # Case min_value interval - check if there is a lower value between the pairs
+            for k in range(j,i-1, -1):
+                if closes[k] < a or closes[k] < b:
+                    flag = True
+                    break
+                
+        if flag == False and abs(i-j) >= int(IS_length_min):
+            best_result = {
+                    "start_time": time_series[i],
+                    "human_start_time": datetime.fromtimestamp(time_series[i]).strftime('%Y-%m-%d'),
+                    "start_price": a,
+                    "end_time": time_series[j],
+                    "human_end_time": datetime.fromtimestamp(time_series[j]).strftime('%Y-%m-%d'),
+                    "end_price": b,
+                }
+            pairs.append(best_result)
+    return pairs
+
 # Function to find the maximum overlapping interval with the smallest price difference
 def find_max_overlap_with_price(maximum_list, minimum_list, closes, times):
     # Function to find the overlap between two intervals
@@ -243,14 +305,29 @@ def find_max_overlap_with_price(maximum_list, minimum_list, closes, times):
                     }
     return best_result
 
-async def define_stability_interval(closes, high, low, times, volume,ctx):
-        # Will be called at each candle.
+def analyze_the_break(last_closes, last_high, last_low, last_times, interval_stabil_local):
+    # Check if closes breaks the stability interval
+    if last_closes > (interval_stabil_local["max_int_start_price"]+interval_stabil_local["max_int_end_price"]) / 2:
+        # check if the high/close ratio is good ( no more than procent_high_close_cross % )
+        if ( last_closes - last_low ) / ( last_high - last_low ) > 1 - procent_high_close_cross:
+            return True
+    else:
+        # check if it breaks the lower interval
+        if last_closes < (interval_stabil_local["min_int_start_price"]+interval_stabil_local["min_int_end_price"]) / 2:
+            return False
+        else:
+            return None
+
+
+
+async def initial_stability_interval(closes, high, low, times, volume,ctx):
+    # initial build of local_maxim, local_minim and check if there is already a stable interval
     interval_stabilitate = False
     global sb
     global max_pairs
     global min_pairs
-    local_maxim = []
-    local_minim = []
+    global local_maxim
+    global local_minim
 
     hlc3 = (high + low + closes)/3
 
@@ -271,16 +348,11 @@ async def define_stability_interval(closes, high, low, times, volume,ctx):
     md = np.select(conditions, choices, default=0)
 
     sb,md,sh = await macd_improved(high,low,hlc3)
-
-    #reset local_maxim, and local_minim --> to be improved -> sliding window ?!
-    #local_maxim.clear()
-    #local_minim.clear()
-
-    #prepare length for local_maxim and local_minim
+    
     for i in range(medie_close_period):
         local_maxim.append(0)
         local_minim.append(0)
-    
+
     for i in range(medie_close_period,len(closes)-1):
         if closes[i-1] < closes[i] and closes[i] > closes[i+1]:
             if closes[i] / medie_close[i-medie_close_period] >= 1 + pr_vrf_dif_medie:
@@ -289,7 +361,6 @@ async def define_stability_interval(closes, high, low, times, volume,ctx):
                 local_maxim.append(0)
         else:
             local_maxim.append(0)
-    local_maxim.append(0) ### To be optimized
 
     #Build the local_minim list
     for i in range(medie_close_period,len(closes)-1):
@@ -300,16 +371,10 @@ async def define_stability_interval(closes, high, low, times, volume,ctx):
                 local_minim.append(0)
         else:
             local_minim.append(0)
-    local_minim.append(0) ### To be optimized
 
-    #await obs.plot_indicator(ctx, "Local_Maxim", times[delta:], local_maxim, run_data["entries"])
-    #await obs.plot_indicator(ctx, "Local_Maxim2", times[delta:], local_maxim, run_data["entries2"])
-    await obs.plot(ctx, "Medie_close", times[:], medie_close, mode="lines",color="blue")
-    await obs.plot(ctx, "Local_maxim", times[:], local_maxim, mode="lines",color="white")
-    await obs.plot(ctx, "Local_minim", times[:], local_minim, mode="lines",color="green")
-
-    #plt.plot(medie_close,times[:len(medie_close)],local_maxim,times[:len(medie_close)],local_minim,times[:len(medie_close)])
-    #plt.show()
+    # await obs.plot(ctx, "Medie_close", times[:], medie_close, mode="lines",color="blue")
+    # await obs.plot(ctx, "Local_maxim", times[:], local_maxim, mode="lines",color="white")
+    # await obs.plot(ctx, "Local_minim", times[:], local_minim, mode="lines",color="green")
 
     ### PRINT MACD
     await obs.plot(ctx, "ImpulseMACD", times[:], md, mode="scatter",color="blue", chart="main-chart")
@@ -323,25 +388,74 @@ async def define_stability_interval(closes, high, low, times, volume,ctx):
 
     return best_result
 
-def analyze_the_break(last_closes, last_high, last_low, last_times, interval_stabil_local):
-    # Check if closes breaks the stability interval
-    if last_closes > (interval_stabil_local["max_int_start_price"]+interval_stabil_local["max_int_end_price"]) / 2:
-        # check if the high/close ratio is good ( no more than procent_high_close_cross % )
-        if ( last_closes - last_low ) / ( last_high - last_low ) > 1 - procent_high_close_cross:
-            return True
-    else:
-        # check if it breaks the lower interval
-        if last_closes < (interval_stabil_local["min_int_start_price"]+interval_stabil_local["min_int_end_price"]) / 2:
-            return False
-        else:
-            return None
+async def continue_stability_interval(closes, high, low, times,volume, local_maxim, local_minim, ctx):
+    # initial build of local_maxim, local_minim and check if there is already a stable interval
+    interval_stabilitate = False
+    global sb
+    global max_pairs
+    global min_pairs
+
+    hlc3 = (high + low + closes)/3
+
+    medie_close = tulipy.sma(closes, medie_close_period)
+    medie_volum = tulipy.sma(volume, 35)
+
+    #Start of MACD
+    src=hlc3
+    hi= await calc_smma(high, lengthMA)
+    lo= await calc_smma(low, lengthMA)
+    mi= await calc_zlema(src, lengthMA)
+
+    md = np.full_like(mi, fill_value=np.nan)
+
+    conditions = [mi > hi, mi < lo]
+    choices = [mi - hi, mi - lo]
+
+    md = np.select(conditions, choices, default=0)
+
+    sb,md,sh = await macd_improved(high,low,hlc3)
     
+    if closes[-3] < closes[-2] and closes[-2] > closes[-1]:
+        if closes[-2] / medie_close[-1] >= 1 + pr_vrf_dif_medie:
+            local_maxim.append(closes[-2])
+        else:
+            local_maxim.append(0)
+    else:
+        local_maxim.append(0)
+
+    #Build the local_minim list
+    if closes[-3] > closes[-2] and closes[-2] < closes[-1]:
+        if closes[-2] / medie_close[-1] <= 1 - pr_vrf_dif_medie:
+            local_minim.append(closes[-2])
+        else:
+            local_minim.append(0)
+    else:
+        local_minim.append(0)
+
+    # await obs.plot(ctx, "Medie_close", times[:], medie_close, mode="lines",color="blue")
+    # await obs.plot(ctx, "Local_maxim", times[:], local_maxim, mode="lines",color="white")
+    # await obs.plot(ctx, "Local_minim", times[:], local_minim, mode="lines",color="green")
+
+    ### PRINT MACD
+    await obs.plot(ctx, "ImpulseMACD", times[:], md, mode="scatter",color="blue", chart="main-chart")
+    await obs.plot(ctx, "ImpulseHisto", times[:], sh, mode="scatter",color="white", chart="main-chart")
+    await obs.plot(ctx, "ImpulseMACDCDSignal", times[:], sb, mode="lines",color="green", chart="main-chart")
+
+    max_pairs = await find_valid_pairs_backwards(closes, high, low, local_maxim, times[:len(local_maxim)], proc_intre_vrf_line_IS, True)
+    min_pairs = await find_valid_pairs_backwards(closes, high, low, local_minim, times[:len(local_minim)], proc_intre_vrf_line_IS, False)
+
+    best_result = find_max_overlap_with_price(max_pairs, min_pairs, closes, times)
+
+    return best_result
+
 async def stability_interval():   
     global interval_stabil_final
 
     async def strategy(ctx):
+        global initial
         global interval_stabil_final
         global interval_stabil_flag
+
         if run_data["entries"] is None:
             # Compute entries only once per backtest.
             times_global = await obs.Time(ctx, max_history=True, use_close_time=True)
@@ -351,25 +465,32 @@ async def stability_interval():
         low = await obs.Low(ctx)
         times = await obs.Time(ctx, use_close_time=True)
         volume = await obs.Volume(ctx)
-        
+
         if len(closes) < interval_stabil:
             return
         else:
-            if interval_stabil_flag == False:
-                result1 = await define_stability_interval(closes[-interval_stabil:], high[-interval_stabil:], low[-interval_stabil:], times[-interval_stabil:], volume[-interval_stabil:],ctx)
+            if initial == True:            
+                result1 = await initial_stability_interval(closes[-interval_stabil:], high[-interval_stabil:], low[-interval_stabil:], times[-interval_stabil:], volume[-interval_stabil:],ctx)
+                initial = False
                 if result1 not in interval_stabil_final and result1 != None:
                     interval_stabil_flag=True
                     interval_stabil_final.append(result1)
             else:
-                mod = analyze_the_break(closes[-1], high[-1], low[-1], times[-1], interval_stabil_final[-1])
-                if mod == False:
-                    interval_stabil_flag=False
-                    print("spargere in jos!")
+                if interval_stabil_flag == False:
+                    result1 = await continue_stability_interval(closes[-interval_stabil:], high[-interval_stabil:], low[-interval_stabil:], times[-interval_stabil:], volume[-interval_stabil:], local_maxim[-interval_stabil:], local_minim[-interval_stabil:], ctx)
+                    if result1 not in interval_stabil_final and result1 != None:
+                        interval_stabil_flag=True
+                        interval_stabil_final.append(result1)
                 else:
-                    if mod == True:
-                        await obs.market(ctx, "buy", amount="10%", stop_loss_offset="-15%", take_profit_offset="25%")
-                        print("spargere buna!")
+                    mod = analyze_the_break(closes[-1], high[-1], low[-1], times[-1], interval_stabil_final[-1])
+                    if mod == False:
                         interval_stabil_flag=False
+                        print("spargere in jos la: ", times[-1])
+                    else:
+                        if mod == True:
+                            await obs.market(ctx, "buy", amount="10%", stop_loss_offset="-15%", take_profit_offset="25%")
+                            print("spargere buna la: ", times[-1])
+                            interval_stabil_flag=False
 
         
         if times[-1] == times_global[-1] and len(interval_stabil_final)!=0:
@@ -434,12 +555,17 @@ async def stability_interval():
      # Read and cache candle data to make subsequent backtesting runs faster.
     datafile = "ExchangeHistoryDataCollector_1733862750.5739202.data"
     #data = await obs.get_data("ETH/USDT", "1d", start_timestamp=1546300800, end_timestamp=1703980800)
+    
+    #print(f"Data read started at: {time.strftime('%X')}")
     data = await obs.get_data("ETH/USDT", "1d", data_file=datafile)
+    #print(f"Data read end at: {time.strftime('%X')}")
 
     run_data = {
         "entries": None,
     }
      # Run a backtest using the above data, strategy and configuration.
+    
+    #print(f"Strategy run started at: {time.strftime('%X')}")
     res = await obs.run(data, strategy, config)
     
     #print("Stability Intervals found: ", interval_stabil_final)
