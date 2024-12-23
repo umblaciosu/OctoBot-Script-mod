@@ -444,7 +444,8 @@ async def continue_stability_interval(closes, high, low, times,volume, local_max
     max_pairs = await find_valid_pairs_backwards(closes, high, low, local_maxim, times[:len(local_maxim)], proc_intre_vrf_line_IS, True)
     min_pairs = await find_valid_pairs_backwards(closes, high, low, local_minim, times[:len(local_minim)], proc_intre_vrf_line_IS, False)
 
-    best_result = find_max_overlap_with_price(max_pairs, min_pairs, closes, times)
+    if len(max_pairs) == 0 and len(min_pairs):
+        best_result = find_max_overlap_with_price(max_pairs, min_pairs, closes, times)
 
     return best_result
 
@@ -553,7 +554,7 @@ async def stability_interval():
     }
 
      # Read and cache candle data to make subsequent backtesting runs faster.
-    datafile = "ExchangeHistoryDataCollector_1733862750.5739202.data"
+    datafile = "ExchangeHistoryDataCollector_1734366532.0180547.data"
     #data = await obs.get_data("ETH/USDT", "1d", start_timestamp=1546300800, end_timestamp=1703980800)
     
     #print(f"Data read started at: {time.strftime('%X')}")

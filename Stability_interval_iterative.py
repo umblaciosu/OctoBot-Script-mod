@@ -21,7 +21,7 @@ interval_stabil_final=[]
 global counter_strategy_run
 counter_strategy_run = 0
 
-IS_length_min = 19  # nr pozitii minime intre varfuri
+IS_length_min = 20  # nr pozitii minime intre varfuri
 interval_stabil = 150
 
 proc_intre_vrf_line_IS = 0.1  #(2%)
@@ -432,9 +432,9 @@ async def stability_interval():
     }
 
      # Read and cache candle data to make subsequent backtesting runs faster.
-    datafile = "ExchangeHistoryDataCollector_1733862750.5739202.data"
-    #data = await obs.get_data("ETH/USDT", "1d", start_timestamp=1546300800, end_timestamp=1703980800)
-    data = await obs.get_data("ETH/USDT", "1d", data_file=datafile)
+    #datafile = "ExchangeHistoryDataCollector_1733862750.5739202.data"
+    data = await obs.get_data("ETH/USDT", "1d", start_timestamp=1546300800, end_timestamp=1703980800)
+    #data = await obs.get_data("ETH/USDT", "1d", data_file=datafile)
 
     run_data = {
         "entries": None,
