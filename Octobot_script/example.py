@@ -34,7 +34,7 @@ async def rsi_test():
     }
 
     # Read and cache candle data to make subsequent backtesting runs faster.
-    data = await obs.get_data("ETH/USDT", "1d", start_timestamp=1505606400)
+    data = await obs.get_data("TWT/USDT", "1d", start_timestamp=1505606400)
     run_data = {
         "entries": None,
     }
