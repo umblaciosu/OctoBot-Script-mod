@@ -6,8 +6,15 @@ import pandas as pd
 import talib as tl
 import matplotlib.pyplot as plt
 import time
+import os
 from datetime import datetime
+from flask import Flask, request, jsonify
+from threading import Lock
 
+app = Flask(__name__)
+
+# Lock to manage the busy state
+processing_lock = Lock()
 #--------------------------INPUTS--------------------------------
 closes = []
 # times = []
@@ -224,10 +231,6 @@ async def finalize_stability_interval(check_interval,closes,times):
     else:
         return None
 
-    # await obs.plot(ctx, "Medie_close", times[:], medie_close, mode="lines",color="blue")
-    # await obs.plot(ctx, "Local_maxim", times[:], local_maxim, mode="lines",color="white")
-    # await obs.plot(ctx, "Local_minim", times[:], local_minim, mode="lines",color="green")
-
     return best_result
 
 
@@ -273,8 +276,6 @@ async def money_maker(symbol,start_time,end_time):
                         interval_stabil_final["price_end"]= closes[-1]
                         interval_stabil_flag=True
 
-
-        
         if times[-1] == times_global[-1] and len(interval_stabil_final)!=0:
             #After all intervals were found - find overlapping intervals and choose the longest
             # with the lowest price diff
@@ -289,10 +290,12 @@ async def money_maker(symbol,start_time,end_time):
                 """
                 printable_interval_max = []
                 printable_interval_min = []
+                index_start = -1
+                index_end = -1
                 index_start = times_global.index(interval["start_time"])
                 index_end = times_global.index(interval["end_time"])
                 
-                if index_start and index_end:
+                if index_start!=-1 and index_end!=-1:
                     #start filling printable_interval_max with 0 until max_interval found
                     for i in range(index_start):
                         printable_interval_max.append(0)
@@ -328,7 +331,7 @@ async def money_maker(symbol,start_time,end_time):
         "max_val": 2500,
     }
 
-     # Read and cache candle data to make subsequent backtesting runs faster.
+    #Read and cache candle data to make subsequent backtesting runs faster.
     #datafile = "ExchangeHistoryDataCollector_1734368220.1443067.data"
     data = await obs.get_data(symbol, "1d", start_timestamp=start_time, end_timestamp=end_time)
     #data = await obs.get_data(symbol, "1d", start_timestamp=start_time, end_timestamp=end_time)
@@ -345,40 +348,81 @@ async def money_maker(symbol,start_time,end_time):
     #print(f"Strategy run started at: {time.strftime('%X')}")
     res = await obs.run(data, strategy, config)
     
-    #print("Stability Intervals found: ", interval_stabil_final)
-
-
     print(res.describe())
      # Generate and open report including indicators plots
-    await res.plot(show=True)
+    #await res.plot(show=True)
      # Stop data to release local databases.
-    await data.stop()
+    #await data.stop()
 
+    #Deleting backtesting files
+    for file_name in data.data_files:
+        file_path = data.tentacles_config.bot_installation_path + "/backtesting/data/"
+        file_name = file_path + file_name
+        if os.path.exists(file_name):
+            os.remove(file_name)  # Delete the file
+            print(f"{file_name} has been deleted.")
+        else:
+            print(f"{file_name} does not exist.")
+    
+    return interval_stabil_print
 
- # Call the execution of the script inside "asyncio.run" as
- # OctoBot-Script runs using the python asyncio framework.
+app = Flask(__name__)
 
-start_time_human = "2023-06-01"
-end_time_human = "2024-12-16"
+@app.route('/command', methods=['POST'])
+def handle_command():
+    
+    global interval_stabil_print
+    global interval_stabil_final
 
-dt_object = datetime.strptime(start_time_human, "%Y-%m-%d")
-epoch_time_start = int(time.mktime(dt_object.timetuple()))
-dt_object = datetime.strptime(end_time_human, "%Y-%m-%d")
-epoch_time_end = int(time.mktime(dt_object.timetuple()))
+    # Check if the application is busy
+    if not processing_lock.acquire(blocking=False):
+        # Return a "busy" response
+        return jsonify({"status": "busy", "message": "The application is currently processing another request."}), 503
+    
+    try:
+        # Get the JSON payload from the request
+        data = request.get_json()
 
-symbol_list = {
-    #"ETH/USDT",
-    #"BTC/USDT",
-    #"XRP/USDT",
-    #"DAR/USDT",
-    #"TWT/USDT",
-    "CTXC/USDT",
-    #"THETA/USDT",
-}
+        # Extract dictionary items
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        try:
+            pair = data["pair"]  # e.g., "ETH/USDT"
+            start_date_human = data["start_date"]  # e.g., "2021-05-03"
+            end_date_human = data["end_date"]  # e.g., "2022-05-03"
 
-for each in symbol_list:
-    result = asyncio.run(money_maker(each,epoch_time_start,epoch_time_end))
-    interval_stabil_print = []
-    interval_stabil_final = []
+            dt_object = datetime.strptime(start_date_human, "%Y-%m-%d")
+            epoch_time_start = int(time.mktime(dt_object.timetuple()))
+            dt_object = datetime.strptime(end_date_human, "%Y-%m-%d")
+            epoch_time_end = int(time.mktime(dt_object.timetuple()))
 
-print("done!")
+            print(jsonify({
+                    "message": "Command received",
+                    "pair": pair,
+                    "start_date": start_date_human,
+                    "end_date": end_date_human
+                }), 200)
+
+            result = asyncio.run(money_maker(pair,epoch_time_start,epoch_time_end))
+            interval_stabil_print = []
+            interval_stabil_final = []
+
+            # Process the command (example output)
+            # return jsonify({
+            #         "status": "success",
+            #         "message": "Command processed successfully.",
+            #         "pair": pair,
+            #         "start_date": start_date_human,
+            #         "end_date": start_date_human
+            #     }), 200
+            
+            return jsonify(result), 200
+        except KeyError as e:
+            return jsonify({"error": f"Missing key: {e}"}), 400
+    finally:
+    # Release the lock after processing is complete
+        processing_lock.release()
+
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=5000)

@@ -1,0 +1,21 @@
+version: '3.8'
+services:
+  influxdb:
+    image: influxdb:2.7
+    container_name: influxdb
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+    environment:
+      - INFLUXDB_ADMIN_USER=admin
+      - INFLUXDB_ADMIN_PASSWORD=billionsusd
+      - INFLUXDB_BUCKET=mybucket
+      - INFLUXDB_ORG=myorg
+      - INFLUXDB_RETENTION=30d
+
+volumes:
+  influxdb-data:
+
+  #token:
+  # 5JtzHoWbtAFf4n6aSZuxdSRJ7A8YUk8Rs__nVbqp2SyezVtXhsGa-AnUvbAcX0A8I7DfwfRog6OL1rSnE1rwdQ==
